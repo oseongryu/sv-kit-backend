@@ -1,6 +1,6 @@
 {
   "name": "@sv/kit-ui",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "svkit 프론트 공통 — API 래퍼(ok/err 규약·인증)·훅·NavSidebar. 소스(tsx) 배포, Next transpilePackages 로 컴파일",
   "license": "UNLICENSED",
   "files": [
@@ -13,7 +13,8 @@
     "./core": "./src/core.ts",
     "./ui/utils": "./src/ui/utils.ts",
     "./ui/*": "./src/ui/*.tsx",
-    "./shell": "./src/shell/index.ts"
+    "./shell": "./src/shell/index.ts",
+    "./route-shell": "./src/route-shell/index.ts"
   },
   "peerDependencies": {
     "next": ">=14",
