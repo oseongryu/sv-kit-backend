@@ -2,7 +2,21 @@
 // 백엔드 응답 규약: 성공 {ok:true, data, meta?} / 실패 {ok:false, error}.
 // 인증(AUTH_ENABLED) 시 토큰을 자동 부착하고 401 이면 /login 으로 보낸다.
 
+// 런타임 override (선택): NEXT_PUBLIC_API_BASE_STORAGE_KEY 를 지정한 앱은
+// 그 localStorage 키의 값이 env 보다 우선한다 (설정 화면에서 API 주소 변경 용도).
+// SSR/프리렌더에선 window 가 없어 env 폴백을 그대로 사용.
+function readApiBaseOverride(): string | null {
+  const key = process.env.NEXT_PUBLIC_API_BASE_STORAGE_KEY;
+  if (!key || typeof window === "undefined") return null;
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null; // 프라이버시 모드 등 localStorage 접근 예외 대비
+  }
+}
+
 export const API_BASE = (
+  readApiBaseOverride() ||
   process.env.NEXT_PUBLIC_API_BASE ||
   process.env.NEXT_PUBLIC_API_BASE_URL ||
   process.env.NEXT_PUBLIC_API_URL ||
@@ -82,7 +96,8 @@ async function handle<T>(res: Response): Promise<T> {
   } catch {
     /* 비 JSON */
   }
-  if (!res.ok || (body && body.ok === false)) {
+  // ok 필드 없이 {error} 만 주는 legacy 응답도 실패로 판정 (ok:false 규약의 상위집합)
+  if (!res.ok || (body && (body.ok === false || (body.error && body.ok === undefined)))) {
     throw new ApiError((body && body.error) || `요청 실패 (HTTP ${res.status})`, res.status);
   }
   return body as T;
