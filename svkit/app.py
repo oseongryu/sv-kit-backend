@@ -66,14 +66,18 @@ def create_app(root: str | None = None) -> Flask:
         auth.seed_users()
 
     # 2) blueprint 등록 (공통: auth/queue/schedule + 도메인)
-    app.register_blueprint(auth.bp)
+    # auth 는 활성일 때만 마운트 — 비활성 앱이 자체 /api/auth/* 를 정의할 수 있게
+    if auth.AUTH_ENABLED:
+        app.register_blueprint(auth.bp)
     app.register_blueprint(queue.bp)
     app.register_blueprint(scheduler.bp)
     for dom in registry.DOMAINS:
-        bp = dom.get("bp")
-        if bp is not None:
+        # 단일 "bp" 또는 복수 "bps" (기존 앱의 라우트 파일별 bp 를 그대로 수용)
+        bps = [b for b in [dom.get("bp"), *(dom.get("bps") or [])] if b is not None]
+        for bp in bps:
             app.register_blueprint(bp)
-            log.info("registered domain: %-16s -> %s", dom["slug"], bp.url_prefix)
+            log.info("registered domain: %-16s -> %s", dom["slug"],
+                     bp.url_prefix or "(라우트 절대경로)")
 
     # 3) 시드 / 수집
     if config.SEED_ON_START:
@@ -152,8 +156,48 @@ def _register_meta_routes(app: Flask) -> None:
             from svkit.response import err
             return err(f"백업 실패: {e}", 500)
 
+    static_dir = os.environ.get("APP_STATIC_DIR")
+    if static_dir:
+        _register_spa_routes(app, static_dir)
+    else:
+        @app.get("/")
+        def root():
+            return jsonify({"service": "integrated platform",
+                            "domains": len(registry.DOMAINS),
+                            "health": "/api/health"})
+
+
+def _register_spa_routes(app: Flask, static_dir: str) -> None:
+    """APP_STATIC_DIR — 정적 SPA(Next static export 등) 서빙.
+
+    1. {dir}/{path} 파일이 있으면 그대로 (해시 파일명 _next/static/ 은 장기 캐시)
+    2. {dir}/{path}/index.html 있으면 서빙 (trailingSlash 페이지)
+    3. 없으면 index.html 반환 (SPA fallback)
+    """
+    from flask import send_from_directory
+
+    root_dir = os.path.abspath(static_dir)
+    if not os.path.isdir(root_dir):
+        raise RuntimeError(f"APP_STATIC_DIR 디렉토리 없음: {root_dir}")
+
+    def _no_cache(response):
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        return response
+
     @app.get("/")
-    def root():
-        return jsonify({"service": "integrated platform",
-                        "domains": len(registry.DOMAINS),
-                        "health": "/api/health"})
+    def spa_index():
+        return _no_cache(send_from_directory(root_dir, "index.html"))
+
+    @app.get("/<path:path>")
+    def spa_proxy(path: str):
+        direct = os.path.join(root_dir, path)
+        if os.path.isfile(direct):
+            if path.startswith("_next/static/"):
+                return send_from_directory(root_dir, path)
+            return _no_cache(send_from_directory(root_dir, path))
+        page_dir = os.path.join(root_dir, path)
+        if os.path.isfile(os.path.join(page_dir, "index.html")):
+            return _no_cache(send_from_directory(page_dir, "index.html"))
+        return _no_cache(send_from_directory(root_dir, "index.html"))
