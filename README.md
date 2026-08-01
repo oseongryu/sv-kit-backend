@@ -1,7 +1,10 @@
-# svkit
+# sv-kit-backend (svkit)
 
 도메인 레지스트리 기반 통합 플랫폼 프레임워크. `sv-agent-team` 스켈레톤의
 백엔드 코어(`common/` + `_base/` + registry + app 팩토리)를 pip 패키지로 분리한 것.
+
+프론트 공통(@sv/kit-ui)은 `sv-kit-frontend` 저장소에 있다. 백엔드 소비자는
+이 저장소만 서브모듈로 물면 된다 (구 `sv-kit` 통합 저장소에서 분리).
 
 > **수정 전 필독**: [CONTRACT.md](CONTRACT.md) — 공개 계약(깨면 소비자 파손)과
 > 내부(자유 변경)의 경계, additive 변경 규율.
