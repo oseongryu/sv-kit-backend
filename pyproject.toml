@@ -1,8 +1,15 @@
 [project]
 name = "svkit"
-version = "0.2.0"
+version = "0.2.1"
 description = "도메인 레지스트리 기반 통합 플랫폼 프레임워크 (Flask + SQLite, 무의존 큐/스케줄러)"
+readme = "README.md"
 requires-python = ">=3.10"
+license = { text = "UNLICENSED" }
+classifiers = [
+    "Framework :: Flask",
+    "Programming Language :: Python :: 3",
+    "Private :: Do Not Upload",
+]
 dependencies = [
     "Flask>=3.0,<4",
     "flask-cors>=4.0,<5",
@@ -10,8 +17,14 @@ dependencies = [
     "python-dateutil>=2.9",
 ]
 
+[project.optional-dependencies]
+s3 = ["boto3>=1.34"]
+
 [tool.setuptools]
 packages = ["svkit"]
+
+[tool.setuptools.package-data]
+svkit = ["py.typed"]
 
 [build-system]
 requires = ["setuptools>=68.0"]

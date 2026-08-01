@@ -1,7 +1,7 @@
 """SSE 공통 포맷 — 폴링 대체 실시간 스트림.
 
 snapshot_fn() 이 반환한 dict 를 1초마다 비교해 변화가 있을 때만 push 한다.
-프론트는 lib/hooks.ts 의 useEventStream 으로 소비한다(끊기면 폴링 폴백).
+프론트는 @sv/kit-ui hooks 의 useEventStream 으로 소비한다(끊기면 폴링 폴백).
 
 사용:
   from svkit.sse import stream_response

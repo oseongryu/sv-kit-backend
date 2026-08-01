@@ -17,7 +17,7 @@ import importlib
 import logging
 import pkgutil
 
-log = logging.getLogger("app.registry")
+log = logging.getLogger("svkit.registry")
 
 DOMAINS = []
 

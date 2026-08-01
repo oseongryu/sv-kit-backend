@@ -51,11 +51,10 @@ def create_app(root: str | None = None) -> Flask:
         sys.path.insert(0, root)
 
     from svkit import auth, config, db, queue, registry, scheduler
-    from svkit.response import ok
 
     registry.load_domains()
 
-    app = Flask("app")
+    app = Flask("svkit")
     app.config["JSON_AS_ASCII"] = False  # 한글 응답
 
     CORS(app, resources={r"/api/*": {"origins": "*"}})

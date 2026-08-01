@@ -12,6 +12,8 @@ pip 패키지로 분리한 것. 규약은 스켈레톤과 동일:
     app = create_app(__file__)
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.1"
 
-from svkit.app import create_app, run  # noqa: F401
+from svkit.app import create_app, run
+
+__all__ = ["__version__", "create_app", "run"]

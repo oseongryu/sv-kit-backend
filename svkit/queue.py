@@ -88,7 +88,7 @@ def lane_for(kind):
 
 
 def handler_for(kind):
-    """등록된 핸들러 함수 반환(없으면 None). 배치(_base.batch)가 인라인 실행에 사용"""
+    """등록된 핸들러 함수 반환(없으면 None). 배치(svkit.batch)가 인라인 실행에 사용"""
     h = _HANDLERS.get(kind)
     return h[0] if h else None
 

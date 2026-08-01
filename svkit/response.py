@@ -1,6 +1,6 @@
 """공통 응답 규약 — 성공 {ok, data, meta}, 실패 {ok:false, error}.
 
-프론트 lib/api.ts 가 이 규약을 기대한다.
+프론트 @sv/kit-ui 의 api 가 이 규약을 기대한다.
 """
 from flask import jsonify
 

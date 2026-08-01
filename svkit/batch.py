@@ -1,6 +1,6 @@
 """배치 공통 포맷 — 여러 큐 스텝(kind)을 순서대로 실행하는 파이프라인.
 
-개별 스텝은 이미 _base.queue 에 핸들러로 등록돼 있다. 배치는 그 스텝들을
+개별 스텝은 이미 svkit.queue 에 핸들러로 등록돼 있다. 배치는 그 스텝들을
 순차 실행하는 상위 kind('batch.<이름>')를 큐에 등록한다. 그래서 배치도
 일반 작업과 같은 레인/중지/재시도/이력 체계를 그대로 쓴다.
 
@@ -11,7 +11,7 @@
       {'kind': 'catalog.details'},
   ], lane='crawl', title='카탈로그 일일 수집')
 
-실행: queue.enqueue('batch.catalog_daily') 또는 스케줄러(_base.scheduler).
+실행: queue.enqueue('batch.catalog_daily') 또는 스케줄러(svkit.scheduler).
 파라미터: {'from_stage': N} — N번째(0부터) 단계부터 재실행.
 단계 시작마다 중지 요청을 확인하고, 각 스텝 내부도 협조적 취소를 따르므로
 중간에 멈추고 다음에 이어서(증분/갱신 로직) 실행할 수 있다.

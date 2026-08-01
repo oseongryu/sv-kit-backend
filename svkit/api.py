@@ -1,6 +1,6 @@
 """API 공통 포맷 — 모든 도메인 `api/` 계층이 공유하는 서빙 헬퍼.
 
-응답 규약(ok/err)은 common.response 를, blueprint/페이징은 이 모듈을 쓴다.
+응답 규약(ok/err)은 svkit.response 를, blueprint/페이징은 이 모듈을 쓴다.
 
 - make_blueprint: `/api/<slug>` prefix blueprint 를 생성 (라우트는 상대경로로 선언)
 - page_args:      ?limit=&offset= 파싱 (상한 가드 포함)
