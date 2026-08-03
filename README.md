@@ -3,12 +3,26 @@
 도메인 레지스트리 기반 통합 플랫폼 프레임워크. `sv-agent-team` 스켈레톤의
 백엔드 코어(`common/` + `_base/` + registry + app 팩토리)를 pip 패키지로 분리한 것.
 
+## 어느 키트를 고르는가 — 스택으로 고른다
+
+백엔드 키트는 **두 계보**다. 둘 다 현역이고, 프레임워크가 다를 뿐이다.
+
+| 쓰는 프레임워크 | 키트 | 저장소 |
+|---|---|---|
+| Flask (+ SQLite) | `svkit` | 이 저장소 — `https://github.com/oseongryu/sv-kit-backend` |
+| FastAPI (+ SQLAlchemy async) | `svkit2` | `https://github.com/oseongryu/sv-kit-backend-v2` |
+
+svkit2 는 svkit 의 대체가 아니다. 도메인 레지스트리·`/api/<slug>`·`{ok,data}` 응답
+규약은 같지만 프레임워크 전제가 서로 달라 한쪽이 다른 쪽을 흡수할 수 없다
+(그 중립화를 시도했다가 되돌린 기록이 svkit2 CONTRACT 의 「설계 원칙」에 있다).
+**Flask 로 짜면 svkit, FastAPI 로 짜면 svkit2** — 고르는 기준은 그것 하나다.
+
 프론트 공통(@sv/kit-ui)은 `sv-kit-frontend` 저장소에 있다 (구 `sv-kit` 통합
 저장소에서 분리). 소비자는 GitHub 태그 tarball 로 버전을 고정해 설치한다:
 
 ```
 # requirements.txt
-svkit @ https://github.com/oseongryu/sv-kit-backend/archive/refs/tags/v0.2.1.tar.gz
+svkit @ https://github.com/oseongryu/sv-kit-backend/archive/refs/tags/svkit-v0.2.2.tar.gz
 ```
 
 단독 실행 예제: [`examples/minimal`](examples/minimal) — 파일 3개로 API 서버 기동.
@@ -28,7 +42,7 @@ site-packages 에 있어 에이전트/개발자가 실수로 수정할 수 없�
 backend/
   app.py            # 아래 몇 줄이 전부
   worker.py
-  requirements.txt  # svkit @ https://github.com/.../tags/v<버전>.tar.gz (+ gunicorn)
+  requirements.txt  # svkit @ https://github.com/.../tags/svkit-v<버전>.tar.gz (+ gunicorn)
   domains/<slug>/   # 비즈니스 코드는 여기만
 ```
 
@@ -72,6 +86,26 @@ sv-agent-team 의 `skeletons/SKELETON.md`(구조) + `SKELETON_IMPL.md`(API 상�
 버전은 semver. 브레이킹 체인지 시 minor(0.x 동안) 승격 + 아래 동기화 필수:
 
 1. `pyproject.toml` + `svkit/__init__.__version__` + CHANGELOG
-2. `git tag v<버전>` → `git push origin main --tags` (태그 push 가 곧 배포)
-3. 소비자 requirements 의 tarball URL 태그 갱신 (스켈레톤 base 포함)
-4. sv-agent-team `SKELETON_IMPL.md` 를 같은 내용으로 갱신 (에이전트용 스펙)
+2. `examples/minimal/requirements.txt` 의 태그 URL 갱신 — 예제도 소비자다.
+   여기를 빼먹으면 저장소가 자기 옛 버전을 설치하는 예제를 배포하게 된다
+3. `git tag svkit-v<버전>` → `git push origin main --tags` (태그 push 가 곧 배포)
+4. 소비자 requirements 의 tarball URL 태그 갱신 (git-worktree-web)
+
+### 태그 형식
+
+**다음 발행부터 `svkit-v<버전>`** 이다 (프론트의 `ui-v…` 와 같은 꼴 — 한 사람이
+여러 키트를 오갈 때 태그만 보고 어느 패키지인지 알기 위해서다).
+
+이미 나간 `v0.1.0`·`v0.2.0`·`v0.2.1` 은 **그대로 둔다.** 옮기지도 지우지도 않는다 —
+소비자 requirements 가 그 URL 을 가리키고 있어서 지금 URL 은 계속 동작한다.
+접두사는 새 태그에만 붙는다.
+
+### 태그 없는 main 커밋을 남기지 않는다
+
+main 에 올라간 것은 태그로 봉인될 때까지 **아무 소비자도 받지 못한다.**
+소비 채널이 태그 tarball 하나뿐이라, 태그 없이 push 된 커밋은 저장소에서는
+보이는데 설치물에는 없는 상태로 남는다. 실제로 그런 어긋남이 한 번 났다 —
+`examples/minimal/requirements.txt` 는 main 에 있지만 `v0.2.1` tarball 에는 없다.
+
+그러니 main 에 push 하는 단위를 릴리스 단위로 맞춘다. 문서만 고친 커밋이라
+버전을 올릴 일이 아니면, 다음 버전 태그에 함께 실릴 것을 알고 남긴다.
