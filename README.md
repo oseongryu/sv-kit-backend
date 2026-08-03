@@ -4,7 +4,14 @@
 백엔드 코어(`common/` + `_base/` + registry + app 팩토리)를 pip 패키지로 분리한 것.
 
 프론트 공통(@sv/kit-ui)은 `sv-kit-frontend` 저장소에 있다 (구 `sv-kit` 통합
-저장소에서 분리). 소비자는 이 저장소를 직접 물지 않고 wheel 을 vendor 로 동봉한다.
+저장소에서 분리). 소비자는 GitHub 태그 tarball 로 버전을 고정해 설치한다:
+
+```
+# requirements.txt
+svkit @ https://github.com/oseongryu/sv-kit-backend/archive/refs/tags/v0.2.1.tar.gz
+```
+
+단독 실행 예제: [`examples/minimal`](examples/minimal) — 파일 3개로 API 서버 기동.
 
 > **수정 전 필독**: [CONTRACT.md](CONTRACT.md) — 공개 계약(깨면 소비자 파손)과
 > 내부(자유 변경)의 경계, additive 변경 규율.
@@ -21,8 +28,7 @@ site-packages 에 있어 에이전트/개발자가 실수로 수정할 수 없�
 backend/
   app.py            # 아래 몇 줄이 전부
   worker.py
-  requirements.txt  # ./vendor/svkit-<v>-py3-none-any.whl (+ gunicorn)
-  vendor/           # 동봉 wheel — 오프라인/무인증 설치
+  requirements.txt  # svkit @ https://github.com/.../tags/v<버전>.tar.gz (+ gunicorn)
   domains/<slug>/   # 비즈니스 코드는 여기만
 ```
 
@@ -65,11 +71,7 @@ sv-agent-team 의 `skeletons/SKELETON.md`(구조) + `SKELETON_IMPL.md`(API 상�
 
 버전은 semver. 브레이킹 체인지 시 minor(0.x 동안) 승격 + 아래 동기화 필수:
 
-1. `pyproject.toml` + `svkit/__init__.__version__`
-2. `git tag v<버전>`
-3. wheel 빌드 → sv-agent-team `skeletons/base/backend/vendor/` 교체
+1. `pyproject.toml` + `svkit/__init__.__version__` + CHANGELOG
+2. `git tag v<버전>` → `git push origin main --tags` (태그 push 가 곧 배포)
+3. 소비자 requirements 의 tarball URL 태그 갱신 (스켈레톤 base 포함)
 4. sv-agent-team `SKELETON_IMPL.md` 를 같은 내용으로 갱신 (에이전트용 스펙)
-
-```bash
-python3 -m pip wheel --no-deps -w dist .
-```

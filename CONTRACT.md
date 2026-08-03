@@ -57,13 +57,13 @@ git-worktree-web)가 깨진다. **내부**에 속하는 것은
 
 | 축 | 배포물 | 소비자 반영 |
 |---|---|---|
-| svkit | `backend/vendor/svkit-X.Y.Z.whl` | wheel 교체 + requirements 갱신 |
+| svkit | GitHub 태그 `vX.Y.Z` (tarball) | requirements 의 태그 URL 갱신 |
 | 스켈레톤 잔여물 | `skeletons/VERSION` + manifest | `skeleton-upgrade` (미수정만 갱신) |
 
-- 태그: `vX.Y.Z`
-- **소비 채널은 vendor 고정 하나**: 스켈레톤 생성물·total·git-worktree-web
-  전부 `vendor/svkit-X.Y.Z.whl` 로 소비 (오프라인 자급·워커 안전).
-  kit 수정 반영 = wheel 재빌드 후 소비자 vendor 교체 + requirements 갱신
-- 소비자는 vendor 로 버전이 고정된다 — kit 의 어떤 변경도 소비자가
-  vendor 를 교체하기 전에는 도달하지 않는다. 이것이 breaking 변경의
-  최종 방어선이다.
+- 태그: `vX.Y.Z` — `git push origin main --tags` 가 곧 배포
+- **소비 채널은 GitHub 태그 고정 하나**: 스켈레톤 생성물·total·git-worktree-web
+  전부 requirements 에 `svkit @ https://github.com/oseongryu/sv-kit-backend/archive/refs/tags/vX.Y.Z.tar.gz`
+  로 고정 소비 (public 저장소 — 무인증, git 바이너리 불필요)
+- 소비자는 태그 URL 로 버전이 고정된다 — kit 의 어떤 변경도 소비자가
+  URL 태그를 올리기 전에는 도달하지 않는다. 이것이 breaking 변경의
+  최종 방어선이다. **한 번 push 한 태그는 옮기지 않는다.**
