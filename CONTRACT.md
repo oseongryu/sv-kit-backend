@@ -16,11 +16,9 @@ svkit 자신의 실적은 0.1.0 → 0.2.1 세 판이다(CHANGELOG 기준).
 
 1. **additive 우선** — 새 기능은 새 서브패스/새 함수/새 옵션 props 로.
    기존 시그니처·키·기본 동작 변경은 breaking 이다.
-2. **breaking 은 CHANGELOG 에 명시한다** — 날짜 버전에는 메이저 자리가 없어
-   버전 문자열이 크기를 말해 주지 않는다. 계약을 깨야 하면 그 판의 CHANGELOG
-   항목에 **깨지는 것과 마이그레이션**을 적어라. 소비자는 태그 URL 로 고정돼
-   있어 자기가 태그를 올릴 때 그 항목을 읽고 알아챈다 — 조용히 도달하지 않는다.
-   이 안전장치를 전제로 설계해도 되지만, **적지 않으면 안전장치가 없는 것과 같다.**
+2. **breaking 은 메이저 신호와 함께** — 계약을 깨야 하면 버전을 올리고
+   README/CHANGELOG 에 마이그레이션을 적는다. 태그 tarball 고정 덕에 기존
+   소비자는 조용히 깨지지 않는다 — 이 안전장치를 전제로 설계해도 된다.
 3. **라이브러리 교체는 내부에서 흡수** — 계약 모양(함수 시그니처 등)을
    유지한 채 구현만 바꾼다.
 4. **소비자가 import 하는 이름은 계약이다** — 소비 앱의 `app.py`·`worker.py`
@@ -61,28 +59,23 @@ svkit 자신의 실적은 0.1.0 → 0.2.1 세 판이다(CHANGELOG 기준).
 
 | 축 | 배포물 | 소비자 반영 |
 |---|---|---|
-| svkit | GitHub 태그 `svkit-vYYYYMMDD.N.0` (tarball) | requirements 의 태그 URL 갱신 |
+| svkit | GitHub 태그 `svkit-vX.Y.Z` (tarball) | requirements 의 태그 URL 갱신 |
 
-- 버전은 **날짜 기반(CalVer) `YYYYMMDD.N.0`** 이다 — 발행일 + 그날의 판 순번(1부터),
-  마지막 `0` 은 자리 채움. `20260804.1.0` 부터 이 형식이고 그 전은 semver(0.x)였다.
-  `.0` 을 붙이는 이유는 npm 이 `major.minor.patch` 세 자리를 강제하기 때문이고
-  (파이썬은 두 자리도 받지만 세 키트의 형식을 하나로 두려고 맞췄다), 월·일을 붙여
-  쓰는 이유는 npm 이 leading zero 를 거부하기 때문이다 — 상세는 CHANGELOG 머리말
-- 태그: **`svkit-vYYYYMMDD.N.0`** (예: `svkit-v20260804.1.0`).
-  `git push origin main --tags` 가 곧 배포.
-  이미 나간 `v0.1.0`·`v0.2.0`·`v0.2.1`(접두사 없음)과 `svkit-v0.2.2`(semver)는
-  그 형식 그대로 두고 옮기지 않는다. 소비자 requirements 의 지금 URL 은 계속
-  동작한다 (아래 태그 불변 규약). 접두사를 붙이는 이유는 프론트 `ui-v…`·svkit2
-  `svkit2-v…` 와 나란히 놓고 태그만 보고 어느 패키지인지 알기 위해서다
+- 버전은 **semver(0.x)** 다 — `20260804.1.0` 한 판만 날짜 기반이었고 0.2.3 에서 되돌렸다
+  (경위는 CHANGELOG 0.2.3).
+- 태그: **`svkit-vX.Y.Z`.** `git push origin main --tags` 가 곧 배포.
+  접두사 없이 나간 `v0.1.0`·`v0.2.0`·`v0.2.1` 과 날짜 버전으로 나간
+  `svkit-v20260804.1.0` 은 그 형식 그대로 두고 옮기지 않는다.
+  소비자 requirements 의 지금 URL 은 계속 동작한다 (아래 태그 불변 규약).
+  접두사를 붙이는 이유는 프론트 `ui-vX.Y.Z`·svkit2 `svkit2-vX.Y.Z` 와 나란히 놓고
+  태그만 보고 어느 패키지인지 알기 위해서다
 - **소비 채널은 GitHub 태그 고정 하나**: git-worktree-web 의 `requirements.txt` 가
   `svkit @ https://github.com/oseongryu/sv-kit-backend/archive/refs/tags/v0.2.1.tar.gz`
   로 고정 소비한다 (public 저장소 — 무인증, git 바이너리 불필요).
   거기서 svkit 을 import 하는 곳은 `app.py` 와 `domains/core/routes_core.py` 다
 - 소비자는 태그 URL 로 버전이 고정된다 — kit 의 어떤 변경도 소비자가
   URL 태그를 올리기 전에는 도달하지 않는다. 이것이 breaking 변경의
-  최종 방어선이고, 날짜 버전에서 메이저 자리를 대신하는 장치이기도 하다.
-  **태그를 올리는 사람이 그 사이 판의 CHANGELOG 를 읽는다**는 전제라,
-  breaking 을 CHANGELOG 에 적는 것이 규칙 2 다. **한 번 push 한 태그는 옮기지 않는다.** 옮기면 소비자가
+  최종 방어선이다. **한 번 push 한 태그는 옮기지 않는다.** 옮기면 소비자가
   같은 URL 로 다른 코드를 받는다 — 고정의 의미가 사라진다
 - 태그가 곧 배포물이라 **태그 없이 main 에만 있는 커밋은 아무에게도 도달하지
   않는다.** main push 단위를 릴리스 단위에 맞춘다 (README 「릴리스」 참조)
