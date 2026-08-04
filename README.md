@@ -22,7 +22,7 @@ svkit2 는 svkit 의 대체가 아니다. 도메인 레지스트리·`/api/<slug
 
 ```
 # requirements.txt
-svkit @ https://github.com/oseongryu/sv-kit-backend/archive/refs/tags/svkit-v0.2.2.tar.gz
+svkit @ https://github.com/oseongryu/sv-kit-backend/archive/refs/tags/svkit-v20260804.1.0.tar.gz
 ```
 
 단독 실행 예제: [`examples/minimal`](examples/minimal) — 파일 3개로 API 서버 기동.
@@ -83,7 +83,8 @@ sv-agent-team 의 `skeletons/SKELETON.md`(구조) + `SKELETON_IMPL.md`(API 상�
 
 ## 릴리스
 
-버전은 semver. 브레이킹 체인지 시 minor(0.x 동안) 승격 + 아래 동기화 필수:
+버전은 **날짜 기반(CalVer) `YYYYMMDD.N.0`** 이다 (`20260804.1.0` 부터. 그 전은 semver 0.x).
+발행할 때마다 아래 동기화 필수:
 
 1. `pyproject.toml` + `svkit/__init__.__version__` + CHANGELOG
 2. `examples/minimal/requirements.txt` 의 태그 URL 갱신 — 예제도 소비자다.
@@ -91,14 +92,35 @@ sv-agent-team 의 `skeletons/SKELETON.md`(구조) + `SKELETON_IMPL.md`(API 상�
 3. `git tag svkit-v<버전>` → `git push origin main --tags` (태그 push 가 곧 배포)
 4. 소비자 requirements 의 tarball URL 태그 갱신 (git-worktree-web)
 
+### 버전 문자열 만들기
+
+`YYYYMMDD.N.0` — `YYYYMMDD` 는 발행일, `N` 은 **그날의 몇 번째 판인지**(1부터),
+마지막 `0` 은 자리 채움이다.
+
+- 오늘 첫 판이면 `N=1`, 같은 날 두 번째 판이면 `N=2`. 날이 바뀌면 다시 1 부터
+- 날짜는 **추정하지 말고 명령으로 얻는다** (KST 기준):
+
+```
+python -c "from datetime import datetime,timezone,timedelta; print(datetime.now(timezone(timedelta(hours=9))).strftime('%Y%m%d'))"
+```
+
+- 그날 이미 나간 판이 있는지는 태그 목록으로 확인한다: `git tag -l 'svkit-v20260804.*'`
+
+마지막 자리 `.0` 은 파이썬 때문이 아니라 **형제 저장소와 형식을 맞추기 위한 것**이다.
+파이썬(PEP 440)은 `20260804.1` 같은 두 자리도 받지만, 프론트(`@sv/kit-ui`)가 쓰는 npm 은
+`major.minor.patch` 세 자리를 강제해 두 자리를 거부한다. 세 키트가 같은 문자열 모양을
+쓰도록 여기서도 세 자리로 적는다. 월·일에 `.` 을 넣지 않는 이유도 같다 — npm 이
+leading zero 를 거부해 `2026.08.04` 는 쓸 수 없다.
+
 ### 태그 형식
 
-**다음 발행부터 `svkit-v<버전>`** 이다 (프론트의 `ui-v…` 와 같은 꼴 — 한 사람이
-여러 키트를 오갈 때 태그만 보고 어느 패키지인지 알기 위해서다).
+태그는 `svkit-v<버전>` 이다 — 예: `svkit-v20260804.1.0` (프론트의 `ui-v…` 와 같은 꼴 —
+한 사람이 여러 키트를 오갈 때 태그만 보고 어느 패키지인지 알기 위해서다).
 
-이미 나간 `v0.1.0`·`v0.2.0`·`v0.2.1` 은 **그대로 둔다.** 옮기지도 지우지도 않는다 —
+접두사 없이 나간 `v0.1.0`·`v0.2.0`·`v0.2.1` 은 **그대로 둔다.** 옮기지도 지우지도 않는다 —
 소비자 requirements 가 그 URL 을 가리키고 있어서 지금 URL 은 계속 동작한다.
-접두사는 새 태그에만 붙는다.
+semver 로 나간 판들(`svkit-v0.2.2` 까지)도 마찬가지다. 버전 체계가 바뀌어도
+이미 발행된 태그는 그 번호 그대로 남는다.
 
 ### 태그 없는 main 커밋을 남기지 않는다
 
