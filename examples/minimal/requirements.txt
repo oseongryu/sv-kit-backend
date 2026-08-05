@@ -1,2 +1,2 @@
 # GitHub 태그 고정 설치 (로컬 개발 시엔 저장소 루트에서: pip install -e ../..)
-svkit @ https://github.com/oseongryu/sv-kit-backend/archive/refs/tags/svkit-v0.2.3.tar.gz
+svkit @ https://github.com/oseongryu/sv-kit-backend/archive/refs/tags/svkit-v0.3.0.tar.gz

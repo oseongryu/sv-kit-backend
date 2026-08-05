@@ -19,13 +19,14 @@ import json
 import os
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from flask import request
 
 from svkit.api import make_blueprint
 from svkit import logger
 from svkit.auth import require_admin, require_auth
+from svkit.base import SPEC_HELP, compute_next
 from svkit.db import connect, get_conn
 from svkit.response import err, ok
 
@@ -48,21 +49,6 @@ TICK = float(os.environ.get('SCHEDULER_TICK', '20'))
 
 _started = False
 _lock = threading.Lock()
-
-
-def compute_next(spec, now=None):
-    """spec 에 따른 다음 실행 시각(epoch). 잘못된 spec 은 ValueError"""
-    now = now or datetime.now()
-    parts = spec.strip().split()
-    if len(parts) == 2 and parts[0] == 'daily':
-        hh, mm = parts[1].split(':')
-        nxt = now.replace(hour=int(hh), minute=int(mm), second=0, microsecond=0)
-        if nxt <= now:
-            nxt += timedelta(days=1)
-        return nxt.timestamp()
-    if len(parts) == 2 and parts[0] == 'interval':
-        return (now + timedelta(minutes=int(parts[1]))).timestamp()
-    raise ValueError(f'지원하지 않는 spec: {spec}')
 
 
 def ensure(name, kind, spec, params=None, enabled=1):
@@ -102,7 +88,8 @@ def init_defaults():
                 logger.error('scheduler', '기본등록실패', name=s.get('name'), err=str(e))
 
 
-def _tick():
+def tick():
+    """due 스케줄을 클레임해 큐에 넣는다(svkit2 와 같은 이름·역할)."""
     from svkit import queue
     now = time.time()
     conn = connect()
@@ -133,10 +120,14 @@ def _tick():
         logger.info('scheduler', '실행', name=r['name'], kind=r['kind'])
 
 
+#: 옛 이름(내부용) — 기존 호출부 보호
+_tick = tick
+
+
 def _loop():
     while True:
         try:
-            _tick()
+            tick()
         except Exception as e:
             logger.error('scheduler', '오류', err=str(e))
         time.sleep(TICK)
@@ -152,6 +143,11 @@ def start_thread():
             return
         _started = True
     threading.Thread(target=_loop, daemon=True).start()
+    logger.info('scheduler', '시작', tick=TICK)
+
+
+#: svkit2 와 이름을 맞춘 별칭(그쪽은 태스크, 여기는 스레드)
+start = start_thread
 
 
 # ── 운영 API (/api/schedule) ──
@@ -181,7 +177,7 @@ def api_save():
     try:
         next_at = compute_next(spec)
     except (ValueError, IndexError):
-        return err("spec 형식: 'daily HH:MM' 또는 'interval N'", 400)
+        return err(SPEC_HELP, 400)
     params = json.dumps(data.get('params') or {}, ensure_ascii=False)
     enabled = 1 if data.get('enabled', 1) else 0
     with get_conn() as conn:

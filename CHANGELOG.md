@@ -9,6 +9,42 @@ svkit 의 모든 소비자 영향 변경을 기록한다. 형식은 Keep a Chang
 항목은 **무엇을 왜** 로 적는다. "무엇" 만 남으면 다음 사람이 그 결정을 되돌려도 되는지
 판단할 수 없다 — 아래 0.2.0·0.1.0 이 그렇게 남아 있다(소급해 지어내지 않고 그대로 둔다).
 
+## 0.3.0
+
+**svkit2(FastAPI 계보)와 공유하는 `svkit.base` 를 도입하고, 두 판의 표면을 맞췄다.**
+언젠가 두 저장소를 합칠 때 소비 프로젝트가 고쳐야 할 줄을 줄이는 것이 목적이다.
+**전부 additive** — 기존 공개 이름·시그니처·응답 모양은 하나도 바꾸지 않았다.
+
+- **`svkit/base.py` 신설.** 프레임워크·DB·async 를 모르는 층을 여기로 모았다:
+  env 파싱(`BaseConfig`)·실패 타입(`ApiError` 계열)·응답 본문·`Page`·`BaseJobState`·
+  `BaseDomain`·스토리지 백엔드·JWT/비밀번호·스케줄 spec·배치 진행 문구·지표와
+  프로메테우스 본문·SSE 프레임·로그 포맷. **이 파일은 sv-kit-backend-v2 에 같은
+  내용으로 들어 있다** — 합치면 한 파일이 되고, 나머지는 프레임워크 어댑터로 남는다
+- **라우팅 중립층은 만들지 않았다.** 그 구조는 v1 에서 한 번 만들었다가 되돌렸고
+  (코드 2배·프레임워크 강점 포기), base 는 라우팅을 다루지 않는다. 두 판이 나누는
+  것은 *규약*이지 *라우팅*이 아니다
+- `svkit.errors` 신설 — `ApiError`/`NotFound`/`Conflict`/`Unauthorized`/`Forbidden`.
+  `create_app` 이 핸들러를 등록하므로 도메인이 `raise ApiError('없음', 404)` 만 해도
+  `{ok:false, error}` 로 나간다. 기존 `return err(...)` 도 그대로 동작한다
+- `create_app` 인자를 svkit2 와 맞췄다 — `title`·`infra`·`expose_error_detail`·
+  `root_route`(+이 판 전용 `wrap_http_errors`). 기본값도 같다. `infra=False` 는
+  DB·잡을 프로젝트가 이미 가진 경우로, 큐/스케줄러 bp·워커·스키마 생성을 건너뛴다
+- `queue.JobState` 신설 — **dict 이면서 속성으로도 읽고 쓴다.** `state['progress']` 로
+  쓰던 핸들러와 svkit2 표기(`state.report(...)`·`state.should_stop`)가 같은 값을 본다
+- `page_args()` 가 `Page(limit, offset)` NamedTuple 을 반환한다(튜플이라 기존
+  `limit, offset = page_args()` 는 그대로)
+- `registry.Domain` 클래스 + `registry.register(app)`, `make_blueprint(slug, prefix,
+  tags, auto_ok)` — `auto_ok=True` 면 핸들러가 알맹이만 반환해도 규약으로 감싼다
+  (svkit2 의 `OkRoute` 와 같은 역할, 기본은 off)
+- 이름 별칭(양쪽에서 같은 문장을 쓰기 위한 것): `make_router`·`db.conn`/`read`·
+  `db.fetch_all`/`fetch_one`/`scalar`/`insert_id`/`exists`·`etl.get_json`/`fetch_retry`·
+  `queue.metrics`·`queue.start_workers`·`scheduler.start`/`tick`·`sse.EventStream`·
+  `auth.require_user`/`current_user`/`User`·`storage.BACKEND`
+- `config` 에 `ENABLED_DOMAINS`·`STATIC_DIR`·`CORS_ORIGINS` 추가(전에는 코드 곳곳에서
+  env 를 직접 읽던 값). CORS 는 `APP_CORS_ORIGINS` 미설정 시 기존대로 전체 허용
+- 부수 변경 두 가지: 불리언 env 가 `1/true/yes/on` 을 모두 받는다(전에는 `1` 만),
+  error 레벨 로그가 stderr 로 나간다(전에는 stdout — svkit2 와 맞췄다)
+
 ## 0.2.3
 
 **날짜 기반(CalVer) 버전 체계를 되돌리고 semver 로 돌아왔다.** 하루 만의 번복이다.

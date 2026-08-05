@@ -1,6 +1,6 @@
 [project]
 name = "svkit"
-version = "0.2.3"
+version = "0.3.0"
 description = "도메인 레지스트리 기반 통합 플랫폼 프레임워크 (Flask + SQLite, 무의존 큐/스케줄러)"
 readme = "README.md"
 requires-python = ">=3.10"

@@ -16,6 +16,10 @@ create_app 이 하는 일 (기존 스켈레톤 backend/app.py 를 그대로 흡�
 4. blueprint 마운트 (auth/queue/scheduler 공통 + 도메인)
 5. 시드/수집(env 옵션) + 인프로세스 워커/스케줄러(RUN_WORKER)
 6. 메타 라우트: /api/health · /api/domains · /metrics · /api/backup · /
+
+**인자는 svkit2 의 create_app 과 맞춰 뒀다** — `title`·`infra`·
+`expose_error_detail`·`root_route`. 인자 기본값도 같다(특히 `infra=True`).
+그래서 두 판 사이에서 `app.py` 는 import 줄 말고는 고칠 것이 없다.
 """
 import logging
 import os
@@ -24,6 +28,8 @@ import sys
 from flask import Flask, Response, jsonify
 from flask_cors import CORS
 
+from svkit.base import resolve_root as _resolve_root
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
@@ -31,65 +37,67 @@ logging.basicConfig(
 log = logging.getLogger("svkit.app")
 
 
-def _resolve_root(root: str | None) -> str:
-    """root 인자 정규화 — 파일 경로면 그 디렉토리, 없으면 cwd."""
-    if not root:
-        return os.getcwd()
-    root = os.path.abspath(root)
-    if os.path.isfile(root):
-        return os.path.dirname(root)
-    return root
-
-
-def create_app(root: str | None = None) -> Flask:
+def create_app(root: str | None = None, title: str = "svkit", infra: bool = True,
+               expose_error_detail: bool = False, root_route: bool = True,
+               wrap_http_errors: bool = False) -> Flask:
     """프로젝트 루트(`domains/` 가 있는 디렉토리)에서 Flask 앱을 조립한다.
 
     root 에는 관례상 `__file__` 을 넘긴다 (파일 경로면 부모 디렉토리 사용).
+
+    infra=False 는 **DB·잡을 프로젝트가 이미 관리하는 경우**를 위한 것이다.
+    큐·스케줄러 blueprint 를 얹지 않고, 워커도 띄우지 않고, 스키마도 만들지
+    않는다. 남는 것은 라우팅 규약(`/api/<slug>`·`{ok,data}`)과 도메인 레지스트리
+    · 메타 라우트뿐이다. 이미 자기 잡 테이블이 있는 프로젝트에 `queue_job` 을
+    새로 만들어 주는 것은 도움이 아니라 침범이라 기본값이 아니라 선택으로 뒀다.
+
+    root_route=False 는 프로젝트가 `/` 를 직접 쓰는 경우(리다이렉트·자체 화면).
+    wrap_http_errors 는 이 판에만 있는 인자다 — 설명은 response 모듈 참조.
     """
     root = _resolve_root(root)
     if root not in sys.path:
         sys.path.insert(0, root)
 
     from svkit import auth, config, db, queue, registry, scheduler
+    from svkit.response import install_error_handlers
 
     registry.load_domains()
 
-    app = Flask("svkit")
+    app = Flask(title)
     app.config["JSON_AS_ASCII"] = False  # 한글 응답
+    app.config["SVKIT_TITLE"] = title
+    app.config["SVKIT_INFRA"] = infra
 
-    CORS(app, resources={r"/api/*": {"origins": "*"}})
+    CORS(app, resources={r"/api/*": {"origins": config.CORS_ORIGINS}})
+    install_error_handlers(app, expose_detail=expose_error_detail,
+                           wrap_http_errors=wrap_http_errors)
 
     # 1) 스키마 초기화 (멱등: 마이그레이션 훅 → 도메인/공통 스키마)
-    db.init_all()
-    if auth.AUTH_ENABLED:
-        auth.seed_users()
+    if infra:
+        db.init_all()
+        if auth.AUTH_ENABLED:
+            auth.seed_users()
 
     # 2) blueprint 등록 (공통: auth/queue/schedule + 도메인)
     # auth 는 활성일 때만 마운트 — 비활성 앱이 자체 /api/auth/* 를 정의할 수 있게
-    if auth.AUTH_ENABLED:
+    if auth.AUTH_ENABLED and infra:
         app.register_blueprint(auth.bp)
-    app.register_blueprint(queue.bp)
-    app.register_blueprint(scheduler.bp)
-    for dom in registry.DOMAINS:
-        # 단일 "bp" 또는 복수 "bps" (기존 앱의 라우트 파일별 bp 를 그대로 수용)
-        bps = [b for b in [dom.get("bp"), *(dom.get("bps") or [])] if b is not None]
-        for bp in bps:
-            app.register_blueprint(bp)
-            log.info("registered domain: %-16s -> %s", dom["slug"],
-                     bp.url_prefix or "(라우트 절대경로)")
+    if infra:
+        app.register_blueprint(queue.bp)
+        app.register_blueprint(scheduler.bp)
+    registry.register(app)
 
     # 3) 시드 / 수집
-    if config.SEED_ON_START:
+    if infra and config.SEED_ON_START:
         _run_seeds()
-    if config.COLLECT_ON_START:
+    if infra and config.COLLECT_ON_START:
         _run_collectors()
 
     # 4) 인프로세스 워커+스케줄러(개발/단일 컨테이너; 전용 워커 분리 시 RUN_WORKER=false)
-    if config.RUN_WORKER:
+    if infra and config.RUN_WORKER:
         queue.start_worker_thread()
         scheduler.start_thread()
 
-    _register_meta_routes(app)
+    _register_meta_routes(app, title=title, infra=infra, root_route=root_route)
     return app
 
 
@@ -126,42 +134,54 @@ def _run_collectors() -> None:
             log.warning("collect failed for %s: %s", dom["slug"], e)
 
 
-def _register_meta_routes(app: Flask) -> None:
-    from svkit import auth, db, queue, registry
+def _register_meta_routes(app: Flask, title: str = "svkit", infra: bool = True,
+                          root_route: bool = True) -> None:
+    from svkit import auth, config, db, queue, registry
+    from svkit.base import domain_prefix
     from svkit.response import ok
 
     @app.get("/api/health")
     def health():
-        return ok({"status": "up", "domains": [d["slug"] for d in registry.DOMAINS]})
+        return ok({"status": "up", "backend": db.backend(),
+                   "domains": [d["slug"] for d in registry.DOMAINS]})
 
     @app.get("/api/domains")
     def domains():
+        def prefix_of(dom):
+            # 도메인이 서브 blueprint 를 쓰는 경우에도 주소 규약은 /api/<slug> 다
+            bps = registry.bps_of(dom)
+            if bps and getattr(bps[0], "url_prefix", ""):
+                return bps[0].url_prefix
+            return domain_prefix(dom["slug"])
+
         return ok([
-            {"slug": d["slug"], "title": d.get("title", d["slug"]),
-             "prefix": d["bp"].url_prefix if d.get("bp") else None}
+            {"slug": d["slug"], "title": d.get("title", d["slug"]), "prefix": prefix_of(d)}
             for d in registry.DOMAINS
         ])
 
-    @app.get("/metrics")
-    def prometheus_metrics():
-        return Response(queue.prometheus_text(), mimetype="text/plain; version=0.0.4")
+    # /metrics·/api/backup 은 인프라(큐·DB)를 전제한다 — infra=False 면 얹지 않는다
+    if infra:
+        @app.get("/metrics")
+        def prometheus_metrics():
+            return Response(queue.prometheus_text(), mimetype="text/plain; version=0.0.4")
 
-    @app.post("/api/backup")
-    @auth.require_admin
-    def backup():
-        try:
-            return ok({"message": "백업 완료", "path": db.backup()})
-        except Exception as e:  # 백업 실패는 사용자에게 사유 전달
-            from svkit.response import err
-            return err(f"백업 실패: {e}", 500)
+        @app.post("/api/backup")
+        @auth.require_admin
+        def backup():
+            try:
+                return ok({"message": "백업 완료", "path": db.backup()})
+            except Exception as e:  # 백업 실패는 사용자에게 사유 전달
+                from svkit.response import err
+                return err(f"백업 실패: {e}", 500)
 
-    static_dir = os.environ.get("APP_STATIC_DIR")
+    static_dir = config.STATIC_DIR or os.environ.get("APP_STATIC_DIR")
     if static_dir:
         _register_spa_routes(app, static_dir)
-    else:
+    elif root_route:
+        # 프로젝트가 `/` 를 직접 쓰는 경우(리다이렉트·자체 화면)에는 root_route=False.
         @app.get("/")
         def root():
-            return jsonify({"service": "integrated platform",
+            return jsonify({"service": title,
                             "domains": len(registry.DOMAINS),
                             "health": "/api/health"})
 

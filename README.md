@@ -17,12 +17,16 @@ svkit2 는 svkit 의 대체가 아니다. 도메인 레지스트리·`/api/<slug
 (그 중립화를 시도했다가 되돌린 기록이 svkit2 CONTRACT 의 「설계 원칙」에 있다).
 **Flask 로 짜면 svkit, FastAPI 로 짜면 svkit2** — 고르는 기준은 그것 하나다.
 
+0.3.0 부터 두 판은 **`base.py` 를 같은 내용으로 나눠 갖는다** — 실패 타입·응답 본문·
+페이징·잡 상태·JWT·스케줄 spec·배치 진행 문구·지표 키·SSE 프레임·로그 포맷.
+라우팅은 여전히 각자의 것이다. 자세한 대응표는 아래 「두 판 대응표」.
+
 프론트 공통(@sv/kit-ui)은 `sv-kit-frontend` 저장소에 있다 (구 `sv-kit` 통합
 저장소에서 분리). 소비자는 GitHub 태그 tarball 로 버전을 고정해 설치한다:
 
 ```
 # requirements.txt
-svkit @ https://github.com/oseongryu/sv-kit-backend/archive/refs/tags/svkit-v0.2.3.tar.gz
+svkit @ https://github.com/oseongryu/sv-kit-backend/archive/refs/tags/svkit-v0.3.0.tar.gz
 ```
 
 단독 실행 예제: [`examples/minimal`](examples/minimal) — 파일 3개로 API 서버 기동.
@@ -70,16 +74,38 @@ sv-agent-team 의 `skeletons/SKELETON.md`(구조) + `SKELETON_IMPL.md`(API 상�
 | import | 역할 |
 |---|---|
 | `svkit.create_app` / `run` | 앱 팩토리 (registry 로드·스키마 init·bp 마운트·시드·워커) |
-| `svkit.db` | 공유 SQLite (`get_conn`, `executescript`, `backup`) |
-| `svkit.response` | `ok()` / `err()` 응답 규약 |
-| `svkit.api` | `make_blueprint(slug)` → `/api/<slug>`, `page_args()` |
+| `svkit.base` | **svkit2 와 공유하는 층** — 실패 타입·응답 본문·`Page`·`JobState`·`Domain`·JWT·스케줄 spec·지표·SSE 프레임 |
+| `svkit.db` | 공유 SQLite (`get_conn`/`conn`, `fetch_all`·`fetch_one`·`scalar`·`insert_id`, `backup`) |
+| `svkit.response` | `ok()` / `err()` 응답 규약 (+`raise ApiError(...)` 도 같은 모양으로) |
+| `svkit.api` | `make_blueprint(slug, prefix, tags, auto_ok)` → `/api/<slug>`, `page_args()` → `Page` |
+| `svkit.errors` | `ApiError`·`NotFound`·`Conflict`·`Unauthorized`·`Forbidden` |
 | `svkit.etl` | `RateLimiter`·`throttle`·`http_get_json`·`fetch_with_retry`·`run_job` |
-| `svkit.queue` | SQLite 작업 큐 (레인·재시도·취소·운영 API·prometheus) |
+| `svkit.queue` | SQLite 작업 큐 (레인·재시도·취소·운영 API·prometheus, `JobState`) |
 | `svkit.scheduler` / `batch` / `sse` | 주기 실행 / 배치 파이프라인 / SSE 스트림 |
 | `svkit.auth` / `storage` / `logger` / `alerts` | JWT 인증 / local↔S3 / 구조화 로깅 / Slack 알림 |
 
 전부 env 로 켜는 opt-in — 기본은 무동작/로컬 (`APP_*`, `AUTH_ENABLED`,
 `STORAGE_BACKEND`, `RUN_WORKER` 등, 상세는 `svkit/config.py`).
+
+## 두 판 대응표 (합칠 때 무엇이 바뀌는가)
+
+같은 이름으로 부를 수 있게 맞춰 뒀다. **바뀌는 것은 대개 import 줄과 `async` 여부**다.
+
+| 하는 일 | svkit (Flask) | svkit2 (FastAPI) |
+|---|---|---|
+| 앱 생성 | `create_app(root, title, infra, expose_error_detail, root_route)` | 같음 |
+| 라우터 선언 | `make_router("catalog")` → Blueprint | `make_router("catalog")` → APIRouter |
+| 성공 응답 | `return ok(data)` 또는 `auto_ok=True` 로 알맹이만 | 알맹이만(`OkRoute` 강제), `ok()` 도 가능 |
+| 실패 | `raise ApiError(msg, status)` / `return err(...)` | 같음(둘 다 동작) |
+| 페이징 | `page = page_args()` (핸들러 안에서) | `page: Page = page_args()` (의존성) |
+| 잡 핸들러 | `def fn(state, params)` | `async def fn(state, params)` |
+| 진행 보고 | `state.report(...)` / `state['progress']` | `state.report(...)` |
+| DB | `with db.get_conn() as c` + SQL 문자열 | `async with db.conn() as c` + SQLAlchemy |
+| 테이블 선언 | `DOMAIN['schema']` DDL 문자열 | `svkit2.metadata` 에 `sa.Table` |
+| 도메인 선언 | `Domain(slug=…, bp=bp)` | `Domain(slug=…, router=router)` |
+
+**남는 차이는 라우팅·DB·async 셋뿐이다.** 그 셋은 각 프레임워크의 전제라
+이름을 맞춰 감출 수 있는 것이 아니고, 감추려다 되돌린 기록이 svkit2 CONTRACT 에 있다.
 
 ## 릴리스
 

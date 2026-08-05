@@ -4,9 +4,12 @@
 
 - RateLimiter:     초당 요청 수 제한(간단 스로틀, 프로세스 내)
 - throttle:        도메인별 전역 요청 간격(SQLite 공유 — 다중 프로세스/레인 안전)
-- http_get_json:   표준 라이브러리 기반 JSON GET
-- fetch_with_retry: 레이트리밋 + 지수 백오프 재시도
+- http_get_json:   표준 라이브러리 기반 JSON GET (별칭 `get_json`)
+- fetch_with_retry: 레이트리밋 + 지수 백오프 재시도 (별칭 `fetch_retry`)
 - run_job:         `<slug>_job_run` 에 시작/종료 이력을 남기며 배치 함수를 실행
+
+`get_json`/`fetch_retry` 는 svkit2 의 이름이다. 두 판에서 같은 이름으로 부를 수
+있게 별칭을 두되, 이 판은 동기이고 그쪽은 async 라는 차이는 그대로 남는다.
 """
 import json
 import os
@@ -28,6 +31,10 @@ CREATE TABLE IF NOT EXISTS etl_rate_limit (
 
 _RATE_MIN = float(os.environ.get('RATE_MIN_INTERVAL', '3'))
 _RATE_MAX = float(os.environ.get('RATE_MAX_INTERVAL', '6'))
+
+#: svkit2 와 이름을 맞춘 별칭
+RATE_MIN = _RATE_MIN
+RATE_MAX = _RATE_MAX
 
 
 class RateLimiter:
@@ -84,14 +91,15 @@ def throttle(url):
         time.sleep(wait)
 
 
-def http_get_json(url: str, timeout: float) -> dict:
-    """URL에서 JSON을 가져온다 (표준 라이브러리 사용)."""
+def http_get_json(url: str, timeout: float | None = None) -> dict:
+    """URL에서 JSON을 가져온다 (표준 라이브러리 사용). timeout 미지정 시 config 값."""
+    from svkit import config
     req = urllib.request.Request(url, headers={"Accept": "application/json"})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
+    with urllib.request.urlopen(req, timeout=timeout or config.HTTP_TIMEOUT) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
-def fetch_with_retry(url: str, timeout: float, max_retries: int = 3,
+def fetch_with_retry(url: str, timeout: float | None = None, max_retries: int = 3,
                      backoff_base_sec: float = 0.5,
                      limiter: "RateLimiter | None" = None) -> dict:
     """레이트리밋 + 지수 백오프 재시도로 소스에서 JSON 수집."""
@@ -107,6 +115,11 @@ def fetch_with_retry(url: str, timeout: float, max_retries: int = 3,
                 time.sleep(backoff_base_sec * (2 ** attempt))
             continue
     raise RuntimeError(f"수집 실패({url}): {last_err}")
+
+
+#: svkit2 와 이름을 맞춘 별칭
+get_json = http_get_json
+fetch_retry = fetch_with_retry
 
 
 def run_job(slug: str, job_type: str, fn) -> int:

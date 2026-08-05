@@ -9,9 +9,13 @@ Redis/Celery 없이 queue_job 테이블 하나로 다중 프로세스 안전 큐
   queue.register('<slug>.collect', fn, lane='crawl')   # fn(state, params)
   queue.enqueue('<slug>.collect', {'x': 1}, label='전체')
 
-핸들러 규약: fn(state, params). state dict 로 진행을 보고한다:
-  state['progress']=str, state['current']/state['total']=int
-  state['should_stop'] 이 True 면 즉시 중단(협조적 취소), state['error']=bool
+핸들러 규약: fn(state, params). state 로 진행을 보고한다. state 는 dict 이면서
+동시에 svkit2 의 JobState 와 같은 속성 표면을 갖는다 — **두 표기가 같은 값을
+읽고 쓴다**:
+  state['progress'] == state.progress,  state.report(progress=..., current=...)
+  state['should_stop'] == state.should_stop 이 True 면 즉시 중단(협조적 취소)
+기존 dict 표기로 쓰던 핸들러는 고칠 것이 없고, svkit2 용으로 쓴 핸들러도
+그대로 돈다(그쪽은 async 라는 점만 다르다).
 
 레인: env QUEUE_LANES(쉼표 구분, 기본 'default'). 레인별 워커 스레드가 동시
 소비하고 레인 내부는 직렬. 핸들러 등록 시 lane 을 지정한다.
@@ -33,6 +37,8 @@ from svkit.api import make_blueprint
 from svkit.sse import stream_response
 from svkit import alerts, logger
 from svkit.auth import require_admin, require_auth
+from svkit.base import BaseJobState, Registered, metrics_body
+from svkit.base import prometheus_text as _prometheus_text
 from svkit.db import get_conn
 from svkit.response import err, ok
 
@@ -77,20 +83,43 @@ _worker_started = False
 _lock = threading.Lock()
 
 
+class JobState(BaseJobState, dict):
+    """실행 중 작업의 살아있는 상태 — dict 이면서 속성으로도 읽고 쓴다.
+
+    저장소는 dict 하나다. 속성 대입이 곧 dict 항목 대입이라
+    `state['progress']` 와 `state.progress` 가 절대 갈라지지 않는다.
+    기존 핸들러(dict 표기)와 svkit2 표기(`state.report(...)`)가 함께 돈다.
+    """
+
+    def __setattr__(self, key, value):
+        self[key] = value
+
+    def __getattr__(self, key):
+        try:
+            return self[key]
+        except KeyError:
+            raise AttributeError(key) from None
+
+
 def register(kind, fn, lane=None):
     """작업 핸들러 등록. fn(state, params). lane 미지정 시 첫 레인"""
-    _HANDLERS[kind] = (fn, lane or LANES[0])
+    _HANDLERS[kind] = Registered(fn, lane or LANES[0])
 
 
 def lane_for(kind):
     h = _HANDLERS.get(kind)
-    return h[1] if h else LANES[0]
+    return h.lane if h else LANES[0]
 
 
 def handler_for(kind):
     """등록된 핸들러 함수 반환(없으면 None). 배치(svkit.batch)가 인라인 실행에 사용"""
     h = _HANDLERS.get(kind)
-    return h[0] if h else None
+    return h.fn if h else None
+
+
+def call_handler(fn, state, params):
+    """핸들러 호출(svkit2 와 같은 이름). 이 판은 동기라 그대로 부른다."""
+    return fn(state, params)
 
 
 def registered_kinds():
@@ -220,12 +249,13 @@ def current_status():
 
 
 def recent_jobs(limit=20):
+    """최근 작업 목록. 레인은 `queue`(기존 컬럼명)와 `lane`(svkit2 이름) 둘 다 싣는다."""
     with get_conn() as conn:
         rows = conn.execute(
             '''SELECT id, kind, label, queue, status, progress, current, total, error,
                       attempts, max_attempts, created_at, started_at, finished_at
                FROM queue_job ORDER BY id DESC LIMIT ?''', (limit,)).fetchall()
-        return [dict(r) for r in rows]
+        return [dict(r, lane=r['queue']) for r in rows]
 
 
 # ── 운영 지표 ──
@@ -256,45 +286,18 @@ def metrics_collect():
             "WHERE status='done' AND finished_at>=? AND started_at IS NOT NULL", (c24,)).fetchone()[0]
         retried = conn.execute('SELECT COUNT(*) FROM queue_job WHERE attempts>1').fetchone()[0]
 
-    total_24 = done_24 + err_24
-    return {
-        'by_status': {s: by_status.get(s, 0) for s in ['queued', 'running', 'done', 'error', 'stopped']},
-        'by_lane': lanes,
-        'queue_depth': by_status.get('queued', 0),
-        'running': by_status.get('running', 0),
-        'done_1h': done_1h,
-        'done_24h': done_24,
-        'error_24h': err_24,
-        'failure_rate_24h': round(err_24 / total_24, 3) if total_24 else 0.0,
-        'avg_duration_sec_24h': round(avg_dur, 1) if avg_dur else 0.0,
-        'retried': retried,
-    }
+    # 집계 질의는 이 판의 것이고, 결과 dict 모양은 base 하나다 — 대시보드가
+    # 두 판을 같은 키로 읽는다(JOB_STATUSES 순서까지 같다).
+    return metrics_body(by_status, lanes, done_1h, done_24, err_24, retried, avg_dur or 0.0)
+
+
+#: svkit2 와 이름을 맞춘 별칭
+metrics = metrics_collect
 
 
 def prometheus_text():
     """Prometheus 텍스트 포맷(/metrics 스크레이프용)"""
-    m = metrics_collect()
-    lines = []
-
-    def g(name, value, help_text):
-        lines.append(f'# HELP {name} {help_text}')
-        lines.append(f'# TYPE {name} gauge')
-        lines.append(f'{name} {value}')
-
-    for status, n in m['by_status'].items():
-        lines.append(f'jobs_total{{status="{status}"}} {n}')
-    for lane, d in m['by_lane'].items():
-        lines.append(f'jobs_lane{{lane="{lane}",state="queued"}} {d["queued"]}')
-        lines.append(f'jobs_lane{{lane="{lane}",state="running"}} {d["running"]}')
-    g('jobs_queue_depth', m['queue_depth'], 'Queued jobs')
-    g('jobs_running', m['running'], 'Running jobs')
-    g('jobs_done_1h', m['done_1h'], 'Jobs done in last hour')
-    g('jobs_done_24h', m['done_24h'], 'Jobs done in last 24h')
-    g('jobs_error_24h', m['error_24h'], 'Jobs errored in last 24h')
-    g('jobs_failure_rate_24h', m['failure_rate_24h'], 'Failure rate last 24h')
-    g('jobs_avg_duration_seconds_24h', m['avg_duration_sec_24h'], 'Avg job duration last 24h')
-    g('jobs_retried_total', m['retried'], 'Jobs retried at least once')
-    return '\n'.join(lines) + '\n'
+    return _prometheus_text(metrics_collect())
 
 
 # ── 워커 ──
@@ -364,7 +367,7 @@ def _run_job(row):
     job_id = row['id']
     params = json.loads(row['params'] or '{}')
     handler = _HANDLERS.get(row['kind'])
-    state = {'should_stop': False, 'progress': '시작', 'current': 0, 'total': 0, 'error': False}
+    state = JobState(job_id=job_id)
     _running[job_id] = state
 
     if handler is None:
@@ -393,7 +396,7 @@ def _run_job(row):
     mon.start()
     status = 'done'
     try:
-        handler[0](state, params)
+        call_handler(handler.fn, state, params)
         if state.get('should_stop'):
             status = 'stopped'
     except Exception as e:
@@ -486,6 +489,10 @@ def start_worker_thread():
     threading.Thread(target=_reaper_loop, daemon=True).start()
     for lane in LANES:
         threading.Thread(target=_lane_loop, args=(lane,), daemon=True).start()
+
+
+#: svkit2 와 이름을 맞춘 별칭(그쪽은 태스크, 여기는 스레드)
+start_workers = start_worker_thread
 
 
 # ── 운영 API (/api/queue) ──

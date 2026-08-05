@@ -3,6 +3,9 @@
 외부 의존성 없이 표준 라이브러리로 구현. 기본 비활성(AUTH_ENABLED=false 면
 데코레이터가 통과)이라 인증이 필요 없는 프로젝트에는 영향이 없다.
 
+**토큰 발급·검증·비밀번호 해시는 `base` 하나**다 — svkit2 와 같은 코드라
+같은 JWT_SECRET 이면 두 판이 서로의 토큰을 받는다.
+
 활성화(AUTH_ENABLED=true) 시:
   - 부팅 때 auth_user 가 비면 env(ADMIN_USER/ADMIN_PASSWORD,
     VIEWER_USER/VIEWER_PASSWORD)로 초기 계정을 시드한다 (app.py 가 호출).
@@ -10,25 +13,22 @@
   - GET  /api/auth/me → ok({auth,username,role})
 토큰 전달: Authorization: Bearer <token>. SSE 등 헤더를 못 싣는 요청은 ?token=.
 
-보호 데코레이터: @require_auth(열람) / @require_admin(조작). g.user 에 payload.
+보호 데코레이터: @require_auth(열람) / @require_admin(조작). g.user 에 payload,
+`current_user()` 로 svkit2 와 같은 `User` 객체를 얻는다.
 """
-import base64
-import hashlib
-import hmac
-import json
 import os
-import time
 from functools import wraps
 
 from flask import g, request
 
+from svkit import base
 from svkit.api import make_blueprint
+from svkit.base import ANONYMOUS_ADMIN, User, hash_password, verify_password
 from svkit.response import err, ok
 
 AUTH_ENABLED = os.environ.get('AUTH_ENABLED', 'false').lower() == 'true'
 SECRET = os.environ.get('JWT_SECRET', 'dev-insecure-secret-change-me').encode()
 TOKEN_TTL = int(os.environ.get('JWT_TTL', '86400'))  # 초, 기본 1일
-_PBKDF_ITER = 200000
 
 SCHEMA = '''
 CREATE TABLE IF NOT EXISTS auth_user (
@@ -41,86 +41,72 @@ CREATE TABLE IF NOT EXISTS auth_user (
 '''
 
 
-def _b64e(b):
-    return base64.urlsafe_b64encode(b).rstrip(b'=').decode()
-
-
-def _b64d(s):
-    return base64.urlsafe_b64decode(s + '=' * (-len(s) % 4))
-
-
-def hash_password(password, salt=None):
-    if salt is None:
-        salt = os.urandom(16)
-    dk = hashlib.pbkdf2_hmac('sha256', password.encode(), salt, _PBKDF_ITER)
-    return f'pbkdf2${salt.hex()}${dk.hex()}'
-
-
-def verify_password(password, stored):
-    try:
-        _, salt_hex, hash_hex = stored.split('$')
-        dk = hashlib.pbkdf2_hmac('sha256', password.encode(), bytes.fromhex(salt_hex), _PBKDF_ITER)
-        return hmac.compare_digest(dk.hex(), hash_hex)
-    except Exception:
-        return False
-
-
 def create_token(username, role):
-    header = _b64e(json.dumps({'alg': 'HS256', 'typ': 'JWT'}).encode())
-    payload = _b64e(json.dumps({'sub': username, 'role': role, 'exp': int(time.time()) + TOKEN_TTL}).encode())
-    seg = f'{header}.{payload}'
-    sig = _b64e(hmac.new(SECRET, seg.encode(), hashlib.sha256).digest())
-    return f'{seg}.{sig}'
+    return base.create_token(username, role, SECRET, TOKEN_TTL)
 
 
 def verify_token(token):
     """유효하면 payload(dict), 아니면 None"""
-    try:
-        seg, sig = token.rsplit('.', 1)
-        expected = _b64e(hmac.new(SECRET, seg.encode(), hashlib.sha256).digest())
-        if not hmac.compare_digest(sig, expected):
-            return None
-        payload = json.loads(_b64d(seg.split('.')[1]))
-        if int(payload.get('exp', 0)) < time.time():
-            return None
-        return payload
-    except Exception:
-        return None
+    return base.verify_token(token, SECRET)
 
 
 def _extract_token():
-    h = request.headers.get('Authorization', '')
-    if h.startswith('Bearer '):
-        return h[7:]
-    return request.args.get('token', '')  # SSE 등 헤더 못 싣는 경우
+    return base.token_from(request.headers.get('Authorization', ''),
+                           request.args.get('token', ''))
 
 
-def require_auth(fn):
-    @wraps(fn)
-    def wrapper(*a, **kw):
-        if not AUTH_ENABLED:
+def _authenticate(admin_only=False):
+    """통과하면 payload, 아니면 (응답, status) 튜플."""
+    if not AUTH_ENABLED:
+        return None
+    payload = verify_token(_extract_token())
+    if not payload:
+        return err('인증 필요', 401)
+    if admin_only and payload.get('role') != 'admin':
+        return err('권한 없음', 403)
+    g.user = payload
+    return None
+
+
+def _guard(admin_only):
+    def decorator(fn):
+        @wraps(fn)
+        def wrapper(*a, **kw):
+            denied = _authenticate(admin_only)
+            if denied is not None:
+                return denied
             return fn(*a, **kw)
-        payload = verify_token(_extract_token())
-        if not payload:
-            return err('인증 필요', 401)
-        g.user = payload
-        return fn(*a, **kw)
-    return wrapper
+        return wrapper
+    return decorator
 
 
-def require_admin(fn):
-    @wraps(fn)
-    def wrapper(*a, **kw):
-        if not AUTH_ENABLED:
-            return fn(*a, **kw)
-        payload = verify_token(_extract_token())
-        if not payload:
-            return err('인증 필요', 401)
-        if payload.get('role') != 'admin':
-            return err('권한 없음', 403)
-        g.user = payload
-        return fn(*a, **kw)
-    return wrapper
+def require_auth(fn=None):
+    """`@require_auth` 와 `@require_auth()` 둘 다 받는다(호출형은 svkit2 표기)."""
+    guard = _guard(False)
+    return guard if fn is None else guard(fn)
+
+
+def require_admin(fn=None):
+    """`@require_admin` 과 `@require_admin()` 둘 다 받는다."""
+    guard = _guard(True)
+    return guard if fn is None else guard(fn)
+
+
+#: svkit2 와 이름을 맞춘 별칭
+require_user = require_auth
+
+
+def current_user():
+    """현재 요청 사용자(`User`). 인증 비활성이면 관리자로 취급한다."""
+    if not AUTH_ENABLED:
+        return ANONYMOUS_ADMIN
+    payload = getattr(g, 'user', None) or verify_token(_extract_token())
+    return User.from_payload(payload) if payload else None
+
+
+def optional_user():
+    """토큰이 있으면 해석하고 없으면 None — 공개 라우트의 선택적 개인화용."""
+    return current_user()
 
 
 def seed_users():
@@ -161,3 +147,9 @@ def me():
     if not AUTH_ENABLED:
         return ok({'auth': False, 'role': 'admin'})
     return ok({'auth': True, 'username': g.user['sub'], 'role': g.user['role']})
+
+
+__all__ = ['AUTH_ENABLED', 'SCHEMA', 'bp', 'User', 'ANONYMOUS_ADMIN',
+           'hash_password', 'verify_password', 'create_token', 'verify_token',
+           'require_auth', 'require_admin', 'require_user', 'current_user',
+           'optional_user', 'seed_users']
