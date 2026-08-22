@@ -2,7 +2,7 @@
 import sqlite3
 from contextlib import contextmanager
 
-from svkit.db.base import DB_PATH, connect, get_db, table_counts  # noqa: F401
+from svkit.db.base import connect, get_db, table_counts  # noqa: F401
 
 
 @contextmanager
@@ -27,8 +27,16 @@ _POSTGRES = {"build_database_url", "get_engine", "get_sessionmaker", "get_sessio
 
 
 def __getattr__(name: str):
-    """postgres 심볼만 지연 해석 — 그 외는 AttributeError 여야 한다
-    (서브모듈 import 가 그 폴백으로 돈다)."""
+    """`DB_PATH` 와 postgres 심볼만 지연 해석 — 그 외는 AttributeError 여야 한다
+    (서브모듈 import 가 그 폴백으로 돈다).
+
+    **값을 `globals()` 에 캐시하지 않는다** — 캐시하면 첫 접근 값이 굳어
+    `APP_DB_PATH` 를 나중에 세운 쪽이 조용히 무시된다.
+    """
+    if name == "DB_PATH":
+        from svkit.db.base import db_path
+
+        return db_path()
     if name in _POSTGRES:
         from svkit.db import postgres
 

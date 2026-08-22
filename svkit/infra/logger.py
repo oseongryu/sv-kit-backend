@@ -65,3 +65,31 @@ def setup_file_logging(filename: str = "server.log", log_dir: str = "") -> str:
 
     print(f"로그 파일: {path}")
     return path
+
+
+def quiet_loggers(*names: str, level: int = logging.WARNING) -> None:
+    """지정 로거의 레벨을 올려 주기성 INFO 소음을 줄인다 — 경고·오류는 그대로 남는다."""
+    for name in names:
+        logging.getLogger(name).setLevel(level)
+
+
+class _AccessPathFilter(logging.Filter):
+    """지정 경로의 성공(2xx) 접근 로그만 걸러낸다 — 실패 응답은 남긴다."""
+
+    def __init__(self, paths: tuple) -> None:
+        super().__init__()
+        self._needles = tuple(f" {p} " for p in paths)
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        if not any(n in msg for n in self._needles):
+            return True
+        return '" 2' not in msg
+
+
+def mute_access_logs(*paths: str, logger_name: str = "uvicorn.access") -> None:
+    """지정 경로의 성공 접근 로그를 억제한다 — 헬스체크류 주기 호출 전용.
+
+    계약: 경로는 쿼리 없는 요청 경로 그대로 일치하고, 2xx 만 걸러 실패는 로그에 남는다.
+    """
+    logging.getLogger(logger_name).addFilter(_AccessPathFilter(paths))

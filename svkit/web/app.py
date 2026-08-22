@@ -102,20 +102,32 @@ def seed_users() -> None:
                 log.info("계정 시드: %s(%s)", u, role)
 
 
-def _auth_router():
-    from pydantic import BaseModel
+# 모듈 스코프여야 한다 — `from __future__ import annotations` 아래에서 함수 안 클래스로
+# 두면 FastAPI 가 문자열 어노테이션을 못 풀어 body 를 쿼리 파라미터로 오인한다(422).
+from pydantic import BaseModel as _BaseModel
 
+
+class LoginIn(_BaseModel):
+    username: str = ""
+    password: str = ""
+
+
+class DeviceIn(_BaseModel):
+    device_id: str = ""
+    secret: str = ""
+
+
+def _auth_router():
     from svkit.web.api import make_router
     from svkit import db
 
     router = make_router("auth")
 
-    class LoginIn(BaseModel):
-        username: str = ""
-        password: str = ""
-
     @router.post("/login")
     def login(body: LoginIn):
+        # 구성 오류는 여기서 한 번만 말한다 — 게이트는 401 로 리다이렉트 동선만 지킨다.
+        if not conf.get_str("JWT_SECRET").strip():
+            raise ApiError("JWT_SECRET 미설정 — 서버 설정(config/local.yml)을 채우고 재기동하라", 503)
         with db.get_conn() as conn:
             row = conn.execute(
                 "SELECT username, password_hash, role FROM auth_user WHERE username=?",
@@ -132,6 +144,21 @@ def _auth_router():
             return {"auth": False}
         return {"auth": True, "username": payload.get("sub"),
                 "role": payload.get("role")}
+
+    @router.post("/device")
+    def device_issue(body: DeviceIn, request: Request):
+        """앱 최초 실행용 토큰 발급 — 공유 시크릿을 제시해야 한다.
+
+        지문의 클라이언트 값은 `X-App-Client` 를 먼저 보고 없으면 UA 로 떨어진다.
+        앱은 그 헤더에 **고정 문자열**을 보낸다 — UA 는 OS 가 좌우해 업데이트 한 번에
+        전 사용자가 지문 불일치로 걸린다.
+        """
+        from svkit.web import device as dev
+
+        client = dev.client_id(request.headers.get(dev.CLIENT_HEADER, ""),
+                               request.headers.get("User-Agent", ""))
+        token, device_id = dev.issue(body.device_id, client, body.secret)
+        return {"token": token, "device_id": device_id, "role": dev.ROLE_APP}
 
     return router
 
@@ -235,7 +262,10 @@ def create_service_app(title: str = "svkit", domains: list | None = None, *,
                 migrate(conn)
 
     if auth_enabled():
+        from svkit.web import device
+
         seed_users()
+        device.ensure_schema()
         app.include_router(_auth_router())
 
     for dom in doms:

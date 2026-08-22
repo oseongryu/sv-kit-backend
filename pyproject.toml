@@ -1,6 +1,6 @@
 [project]
 name = "svkit"
-version = "2.0.0"
+version = "2.1.0"
 description = "FastAPI 웹 커널 + 설정 창구 + DB 커널 — 도메인 모듈을 조합해 배포 변형을 찍어내는 백엔드 킷"
 readme = "README.md"
 requires-python = ">=3.10"

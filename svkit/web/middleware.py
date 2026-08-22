@@ -174,6 +174,20 @@ def camel_api_prefixes() -> tuple:
     return tuple(out)
 
 
+def camel_opaque_keys() -> frozenset:
+    """도메인이 `DOMAIN["camel_opaque"]` 로 선언한 **값이 데이터인 키**.
+
+    그 키의 하위 트리는 변환하지 않는다 — 사람이 이름을 짓는 dict(잡 파라미터·자동화
+    파라미터·지표 attrs)까지 바꾸면 저장된 값이 바뀐다. 목록은 앱이 갖는다.
+    """
+    from svkit.web import app as web
+
+    out = set()
+    for dom in web.DOMAINS:
+        out.update(dom.get('camel_opaque') or [])
+    return frozenset(out)
+
+
 class CasingMiddleware(BaseHTTPMiddleware):
     """선언한 경로에서만 바깥 camelCase 와 안쪽 snake_case 를 오간다.
 
@@ -184,22 +198,24 @@ class CasingMiddleware(BaseHTTPMiddleware):
     **선언이 하나도 없으면 아무 것도 하지 않는다.**
     """
 
-    def __init__(self, app, prefixes: tuple | None = None):
+    def __init__(self, app, prefixes: tuple | None = None, opaque=None):
         super().__init__(app)
         self._prefixes = prefixes
+        self._opaque = opaque
 
     async def dispatch(self, request, call_next):
         if self._prefixes is None:
             self._prefixes = camel_api_prefixes()
+            self._opaque = camel_opaque_keys() if self._opaque is None else self._opaque
         if not self._prefixes or not request.url.path.startswith(self._prefixes):
             return await call_next(request)
 
-        await self._request_to_snake(request)
+        await self._request_to_snake(request, self._opaque or frozenset())
         response = await call_next(request)
-        return await self._response_to_camel(response)
+        return await self._response_to_camel(response, self._opaque or frozenset())
 
     @staticmethod
-    async def _request_to_snake(request) -> None:
+    async def _request_to_snake(request, opaque) -> None:
         from svkit.web.casing import camel_to_snake, keys_to_snake
 
         if request.scope.get('query_string'):
@@ -214,7 +230,8 @@ class CasingMiddleware(BaseHTTPMiddleware):
                     payload = json.loads(raw)
                 except ValueError:
                     return
-                body = json.dumps(keys_to_snake(payload), ensure_ascii=False).encode('utf-8')
+                body = json.dumps(keys_to_snake(payload, opaque),
+                                  ensure_ascii=False).encode('utf-8')
                 request._body = body
 
                 async def receive():
@@ -223,7 +240,7 @@ class CasingMiddleware(BaseHTTPMiddleware):
                 request._receive = receive
 
     @staticmethod
-    async def _response_to_camel(response):
+    async def _response_to_camel(response, opaque):
         from svkit.web.casing import keys_to_camel
 
         if not response.headers.get('content-type', '').startswith('application/json'):
@@ -235,8 +252,128 @@ class CasingMiddleware(BaseHTTPMiddleware):
             return Response(content=raw, status_code=response.status_code,
                             headers=dict(response.headers))
         if isinstance(payload, dict) and 'data' in payload:
-            payload['data'] = keys_to_camel(payload['data'])
+            payload['data'] = keys_to_camel(payload['data'], opaque)
             raw = json.dumps(payload, ensure_ascii=False).encode('utf-8')
         headers = {k: v for k, v in response.headers.items() if k.lower() != 'content-length'}
         return Response(content=raw, status_code=response.status_code, headers=headers,
                         media_type='application/json')
+
+
+class AuthGateMiddleware:
+    """보호 접두 아래 HTTP 요청을 토큰 하나로 지키는 ASGI 게이트.
+
+    자리는 `Authorization: Bearer <토큰>` 하나이고 출처가 셋이다 — 사람(로그인 JWT
+    role=admin) · 앱(발급 JWT role=app, 지문 바인딩) · 기계(설정 고정값). 받는 쪽은
+    출처를 구분하지 않고 role 만 본다.
+
+    - `AUTH_ENABLED` 꺼짐 → 전부 통과 (기존 배포 무영향).
+    - `admin` 접두는 role=admin 만 (기계 고정키는 서버간 채널이라 통과).
+    - role=app 토큰은 요청 UA 로 지문을 다시 계산해 대조한다. **어긋나도 즉시 막지
+      않는다**(`svkit.web.device`) — 유예 뒤 확률적으로 막고, 거절 문구는 무토큰과 같다.
+    - `JWT_SECRET` 미설정도 401 이다 — 화면이 로그인으로 리다이렉트하는 동선을 지키고
+      (구성 오류 문구를 위젯마다 흘리지 않는다), 상세는 로그인 시도가 503 으로 말한다.
+    - 경로의 뜻은 앱이 안다 — 보호·예외·관리 접두는 인자로 받는다.
+    - 옛 헤더(`X-Admin-Key`·`X-Admin-Token`)도 계속 받는다 — 이미 도는 운영 스크립트가
+      깨지지 않게. 새로 쓰는 쪽은 Bearer 하나다.
+    """
+
+    def __init__(self, app, protect: tuple = ("/api/",),
+                 exempt: tuple = ("/api/auth/", "/api/health", "/api/domains"),
+                 admin: tuple = ("/api/admin/",)):
+        self.app = app
+        self.protect = tuple(protect)
+        self.exempt = tuple(exempt)
+        self.admin = tuple(admin)
+
+    def _needs_auth(self, path: str) -> bool:
+        if not any(path.startswith(p) for p in self.protect):
+            return False
+        return not any(path == e.rstrip("/") or path.startswith(e)
+                       for e in self.exempt)
+
+    def _is_admin_path(self, path: str) -> bool:
+        return any(path == a.rstrip("/") or path.startswith(a) for a in self.admin)
+
+    @staticmethod
+    def _header(scope, name: str) -> str:
+        for k, v in scope.get("headers") or []:
+            if k.decode("latin-1").lower() == name:
+                return v.decode("latin-1")
+        return ""
+
+    @classmethod
+    def _token_of(cls, scope) -> str:
+        auth = cls._header(scope, "authorization")
+        if auth.startswith("Bearer "):
+            return auth[7:].strip()
+        from urllib.parse import parse_qs
+
+        qs = parse_qs((scope.get("query_string") or b"").decode("latin-1"))
+        return (qs.get("token") or [""])[0]
+
+    @staticmethod
+    async def _deny(send, status: int, message: str) -> None:
+        import json as _json
+
+        body = _json.dumps({"ok": False, "error": message},
+                           ensure_ascii=False).encode("utf-8")
+        await send({"type": "http.response.start", "status": status,
+                    "headers": [(b"content-type", b"application/json; charset=utf-8")]})
+        await send({"type": "http.response.body", "body": body})
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http" or not self._needs_auth(scope.get("path", "")):
+            await self.app(scope, receive, send)
+            return
+
+        from svkit.loader import conf
+
+        if not conf.get_bool("AUTH_ENABLED"):
+            await self.app(scope, receive, send)
+            return
+
+        presented = self._token_of(scope)
+
+        # 기계 채널 — 고정값은 Bearer 로도, 옛 헤더로도 받는다.
+        fixed = {v for v in (conf.get_str("ADMIN_API_KEY").strip(),
+                             conf.get_str("ADMIN_TOKEN").strip()) if v}
+        if fixed and (presented in fixed
+                      or self._header(scope, "x-admin-key").strip() in fixed
+                      or self._header(scope, "x-admin-token").strip() in fixed):
+            await self.app(scope, receive, send)
+            return
+
+        if not conf.get_str("JWT_SECRET").strip():
+            await self._deny(send, 401, "인증 필요")
+            return
+
+        from svkit.web.security import verify_token
+
+        payload = verify_token(presented)
+        if not payload:
+            await self._deny(send, 401, "인증 필요")
+            return
+
+        role = str(payload.get("role") or "")
+
+        if self._is_admin_path(scope.get("path", "")) and role != "admin":
+            await self._deny(send, 403, "권한 없음")
+            return
+
+        if role == "app":
+            from svkit.web import device
+
+            client = device.client_id(self._header(scope, "x-app-client"),
+                                      self._header(scope, "user-agent"))
+            if device.check(payload, client):
+                # 사유는 로그가 갖는다 — 응답 문구는 무토큰과 같아야 무엇이 걸렸는지
+                # 드러나지 않는다.
+                delay = device.suspect_delay_sec()
+                if delay:
+                    import asyncio
+
+                    await asyncio.sleep(delay)
+                await self._deny(send, 401, "인증 필요")
+                return
+
+        await self.app(scope, receive, send)

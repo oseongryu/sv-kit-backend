@@ -70,6 +70,14 @@ svkit 를 고치는 사람(사람이든 에이전트든)을 위한 경계 선언
 선택(`SqliteDB`, postgres 지연 해석)만 노출한다. **표에 없는 이름은 반드시
 `AttributeError`** — 서브모듈 import 가 그 폴백 경로다.
 
+**`DB_PATH` 는 접근 시점에 풀린다** — `APP_DB_PATH` 가 단일 소스라는 말의 뜻이 그것이다.
+모듈 상수로 굳히면 `svkit.db` 를 먼저 import 한 쪽이 이겨, 그 뒤에 env 를 세워도 무시된
+채 엉뚱한 파일을 문다(계약 테스트가 공유 `db/app.db` 를 물어 상태를 누적시킨 적이 있다).
+그래서 **값을 이름으로 가져가 두지 않는다**: `from svkit.db import DB_PATH` 는 그 순간을
+고정하므로 `from svkit import db` 후 `db.DB_PATH` 로 읽고, 커널 안에서는 함수
+`svkit.db.base.db_path()` 를 부른다(함수 안 전역 조회는 모듈 `__getattr__` 을 타지 않는다).
+배럴도 값을 `globals()` 에 캐시하지 않는다.
+
 ### 호스트 파이썬 경로
 
 `loader` 영역(+`hooks`·패키지 `__init__`)은 **컨테이너 밖 호스트에서도 도는 경로**다 —

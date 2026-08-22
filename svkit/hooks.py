@@ -94,8 +94,12 @@ def timezone() -> str:
 
 
 def log_dir() -> Path:
-    """파일 로깅 디렉토리. 없으면 앱 루트 밑 `logs/`."""
-    value = get("log_dir")
+    """파일 로깅 디렉토리. 없으면 env `APP_LOG_DIR`, 그것도 없으면 앱 루트 밑 `logs/`.
+
+    env 갈래가 있는 이유는 앱 루트가 리포 안이기 때문이다 — 로그가 리포와 함께 지워지지
+    않게 배포가 자기 데이터 자리를 넘긴다(컨테이너는 볼륨 지점을 넘긴다).
+    """
+    value = get("log_dir") or os.environ.get("APP_LOG_DIR")
     return Path(value) if value else app_root() / "logs"
 
 

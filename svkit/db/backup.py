@@ -13,7 +13,7 @@ import time
 from datetime import datetime
 
 from svkit.loader import conf
-from svkit.db.base import DB_PATH, connect
+from svkit.db.base import connect, db_path
 from svkit.infra.logger import get_logger
 
 log = get_logger(__name__)
@@ -22,11 +22,11 @@ _backup_thread_started = False
 
 
 def backup_dir() -> str:
-    return conf.get_str("APP_BACKUP_DIR") or os.path.join(os.path.dirname(str(DB_PATH)), "backup")
+    return conf.get_str("APP_BACKUP_DIR") or os.path.join(os.path.dirname(str(db_path())), "backup")
 
 
 def _prefix() -> str:
-    return os.path.basename(str(DB_PATH)).rsplit(".", 1)[0]
+    return os.path.basename(str(db_path())).rsplit(".", 1)[0]
 
 
 def backup() -> str:
@@ -85,15 +85,15 @@ def latest_backup() -> str | None:
 
 def restore_if_missing() -> bool:
     """DB 파일이 없으면 최신 백업에서 복원. 반환: 복원 여부."""
-    if os.path.exists(DB_PATH):
+    if os.path.exists(db_path()):
         return False
     src = latest_backup()
     if not src:
         return False
-    os.makedirs(os.path.dirname(str(DB_PATH)), exist_ok=True)
-    tmp = f"{DB_PATH}.restore.{os.getpid()}"
+    os.makedirs(os.path.dirname(str(db_path())), exist_ok=True)
+    tmp = f"{db_path()}.restore.{os.getpid()}"
     shutil.copy2(src, tmp)
-    os.replace(tmp, DB_PATH)
+    os.replace(tmp, db_path())
     return True
 
 

@@ -16,6 +16,7 @@ _EXPORTS = {
     "camel_to_snake": "casing", "snake_to_camel": "casing",
     "keys_to_snake": "casing", "keys_to_camel": "casing",
     "CasingMiddleware": "middleware",
+    "AuthGateMiddleware": "middleware",
     "hash_password": "security", "verify_password": "security",
     "create_token": "security", "verify_token": "security",
     "PBKDF_ITER": "security",

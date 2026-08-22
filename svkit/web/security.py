@@ -46,11 +46,16 @@ def _secret() -> bytes:
     return conf.require("JWT_SECRET").encode()
 
 
-def create_token(username: str, role: str) -> str:
-    ttl = conf.get_int("JWT_TTL")
+def create_token(username: str, role: str, ttl: int | None = None,
+                 extra: dict | None = None) -> str:
+    """추가 클레임은 `extra` 로만 넣는다 — sub·role·exp 는 형식 동결이다."""
+    if ttl is None:
+        ttl = conf.get_int("JWT_TTL")
+    claims = {"sub": username, "role": role, "exp": int(time.time()) + ttl}
+    if extra:
+        claims.update(extra)
     header = _b64e(json.dumps({"alg": "HS256", "typ": "JWT"}).encode())
-    payload = _b64e(json.dumps(
-        {"sub": username, "role": role, "exp": int(time.time()) + ttl}).encode())
+    payload = _b64e(json.dumps(claims).encode())
     seg = f"{header}.{payload}"
     return f"{seg}.{_b64e(hmac.new(_secret(), seg.encode(), hashlib.sha256).digest())}"
 

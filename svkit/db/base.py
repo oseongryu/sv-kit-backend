@@ -8,8 +8,24 @@ from svkit import hooks
 from svkit.db.kernel import connect as _connect
 
 # APP_DB_PATH 가 단일 소스 — 여기서 따로 도출하면 빈 DB 를 조용히 새로 만든다.
-DB_PATH = Path(os.environ.get("APP_DB_PATH")
-               or hooks.app_root() / "db" / "app.db")
+def db_path() -> Path:
+    """DB 파일 자리. **호출 시점에** 푼다.
+
+    모듈 상수로 굳히면 `svkit.db` 를 먼저 import 한 쪽이 이긴다 — 그 뒤에 `APP_DB_PATH`
+    를 세워도 무시되어 엉뚱한 파일을 물고, 그 사실이 드러나지 않는다.
+    """
+    return Path(os.environ.get("APP_DB_PATH")
+                or hooks.app_root() / "db" / "app.db")
+
+
+def __getattr__(name: str):
+    """`DB_PATH` 는 공개 면이라 이름을 유지하되 접근 시점에 푼다(PEP 562).
+
+    함수 안에서는 전역 조회가 이 훅을 타지 않으므로 커널 코드는 `db_path()` 를 부른다.
+    """
+    if name == "DB_PATH":
+        return db_path()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def connect() -> sqlite3.Connection:
@@ -19,7 +35,7 @@ def connect() -> sqlite3.Connection:
     배포만 `config/<edition>.yml` 에서 켠다.
     """
     return _connect(
-        DB_PATH,
+        db_path(),
         foreign_keys=conf.get_bool("APP_SQLITE_FOREIGN_KEYS"),
         busy_timeout_ms=conf.get_int("APP_SQLITE_BUSY_TIMEOUT"),
         journal=conf.get_str("APP_SQLITE_JOURNAL"),
@@ -39,9 +55,10 @@ def table_counts(*tables) -> dict:
     """
     import os
 
-    if not os.path.exists(DB_PATH):
+    path = db_path()
+    if not os.path.exists(path):
         return {t: None for t in tables}
-    con = sqlite3.connect(DB_PATH)
+    con = sqlite3.connect(path)
     try:
         cur = con.cursor()
         out = {}

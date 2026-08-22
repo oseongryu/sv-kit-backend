@@ -1,6 +1,6 @@
 """svkit — FastAPI 웹 커널·로더·DB 커널. 영역별 하위 패키지로 갈려 있다.
 
-    svkit.loader/web/db/infra
+    svkit.loader/web/db/automation/browser/term/infra
 
 **영역은 곧 의존 등급이다** — 커널(`loader`·`web`)은 fastapi 하나로 돌고 나머지는 extra 다.
 쓰지 않는 영역의 의존은 깔지 않아도 되므로, 선택 영역은 최상위 import 대신 `has()` 로 묻는다.

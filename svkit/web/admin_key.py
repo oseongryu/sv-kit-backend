@@ -38,11 +38,13 @@ def require_admin_key(
         if scheme.lower() == "bearer":
             presented = token.strip()
 
-    if not presented or presented != expected:
-        raise HTTPException(
-            status_code=401,
-            detail="관리자 인증 실패: 유효한 X-Admin-Key 헤더가 필요합니다.",
-        )
+    if presented == expected or _is_admin_jwt(presented):
+        return
+
+    raise HTTPException(
+        status_code=401,
+        detail="관리자 인증 실패: 유효한 토큰이 필요합니다.",
+    )
 
 
 ADMIN_TOKEN_ENV = "ADMIN_TOKEN"
@@ -53,17 +55,43 @@ def admin_token_configured() -> bool:
     return bool(conf.get_str(ADMIN_TOKEN_ENV).strip())
 
 
+def _is_admin_jwt(token: str) -> bool:
+    """로그인이 발급한 관리자 토큰인가. JWT_SECRET 이 없으면 판정 자체를 안 한다."""
+    if not token or not conf.get_str("JWT_SECRET").strip():
+        return False
+    from svkit.web.security import verify_token
+
+    payload = verify_token(token)
+    return bool(payload) and payload.get("role") == "admin"
+
+
 def check_admin_token(token: Optional[str]) -> None:
-    """토큰 검사 — 헤더를 직접 받는 라우트·WebSocket 용."""
+    """토큰 검사 — 헤더를 직접 받는 라우트·WebSocket 용.
+
+    받는 것은 둘이다 — 로그인이 발급한 관리자 JWT, 그리고 설정 고정값(기계 채널).
+    **인증이 켜진 배포에서는 "설정이 없으면 통과" 가 적용되지 않는다** — 앱 토큰
+    (role=app)이 게이트를 지나 여기까지 오므로, 열어 두면 앱이 관리 API 를 부를 수 있다.
+    """
+    presented = (token or "").strip()
+    if _is_admin_jwt(presented):
+        return
     required = conf.get_str(ADMIN_TOKEN_ENV).strip()
-    if required and (token or "").strip() != required:
-        raise HTTPException(status_code=403, detail="관리 토큰 불일치")
+    if required and presented == required:
+        return
+    if required or conf.get_bool("AUTH_ENABLED"):
+        raise HTTPException(status_code=403, detail="관리 권한 필요")
 
 
 def require_admin_token(
     x_admin_token: Optional[str] = Header(default=None, alias=ADMIN_TOKEN_HEADER),
+    authorization: Optional[str] = Header(default=None),
 ) -> None:
-    check_admin_token(x_admin_token)
+    presented = (x_admin_token or "").strip()
+    if not presented and authorization:
+        scheme, _, tok = authorization.partition(" ")
+        if scheme.lower() == "bearer":
+            presented = tok.strip()
+    check_admin_token(presented)
 
 
 # 라우트 선언에 그대로 얹는 의존성 목록
